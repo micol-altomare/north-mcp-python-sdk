@@ -9,23 +9,22 @@ load_dotenv()
 # update all the mcp tool functions to be <firstname_lastname>_<tool>
 # since mcp tool names MUST be unique
 
-mcp = NorthMCPServer(
-    name="Google Calendar",
-    host="0.0.0.0",
-    port=3002
-)
+mcp = NorthMCPServer(name="Google Calendar", host="0.0.0.0", port=3002)
 
 CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3"
+
 
 def _get_google_token():
     return os.getenv("ACCESS_TOKEN")
 
 
-async def _fetch_calendar_data(access_token: str, url: str, params: dict = None):
+async def _fetch_calendar_data(
+    access_token: str, url: str, params: dict = None
+):
     """Helper function for GET requests to Google Calendar API"""
     # Authorization header authenticates with Google using OAuth2 bearer token
     headers = {"Authorization": f"Bearer {access_token}"}
-    
+
     # Using async/await for non-blocking I/O - allows the server to handle multiple
     # calendar requests concurrently while waiting for Google API responses
     async with httpx.AsyncClient() as client:
@@ -36,33 +35,31 @@ async def _fetch_calendar_data(access_token: str, url: str, params: dict = None)
         return response.json()
 
 
-async def _modify_calendar_data(access_token: str, url: str, method: str, json_payload: dict = None):
+async def _modify_calendar_data(
+    access_token: str, url: str, method: str, json_payload: dict = None
+):
     """Helper function for POST/DELETE requests to Google Calendar API"""
     # Authorization header authenticates with Google using OAuth2 bearer token
     headers = {"Authorization": f"Bearer {access_token}"}
-    
+
     # Content-Type header tells Google the payload format (only needed when sending data)
     if json_payload:
         headers["Content-Type"] = "application/json"
-    
+
     async with httpx.AsyncClient() as client:
         # json_payload is the request body containing data to send (e.g., event details
         # for creating/updating events). It's automatically serialized to JSON format.
         response = await client.request(
-            method,
-            url,
-            headers=headers,
-            json=json_payload
+            method, url, headers=headers, json=json_payload
         )
         response.raise_for_status()
-        
+
         # 204 = "No Content" - request succeeded but no response body (typical for DELETE)
         # Return success dict instead of trying to parse empty response as JSON
         if response.status_code == 204:
             return {"success": True}
-        
-        return response.json()
 
+        return response.json()
 
 
 def format_event_to_document(event):
@@ -71,7 +68,7 @@ def format_event_to_document(event):
     description = event.get("description", "")
     location = event.get("location", "")
     html_link = event.get("htmlLink", "")
-    
+
     # Format start and end times
     # Google Calendar has two event types:
     # - Timed events: {"start": {"dateTime": "2026-01-15T10:00:00Z"}}
@@ -81,7 +78,7 @@ def format_event_to_document(event):
     # Nested fallback: try dateTime first (timed events), then date (all-day), then default
     start_time = start.get("dateTime", start.get("date", "Not specified"))
     end_time = end.get("dateTime", end.get("date", "Not specified"))
-    
+
     # Format attendees
     attendees = event.get("attendees", [])
     attendees_formatted = []
@@ -90,7 +87,7 @@ def format_event_to_document(event):
         status = attendee.get("responseStatus", "needsAction")
         organizer = " (Organizer)" if attendee.get("organizer") else ""
         attendees_formatted.append(f"{name} - {status}{organizer}")
-    
+
     # Format conference data
     # Entry points are different ways to join a meeting: video link, phone dial-in, SIP address
     # We filter for "video" type to get the clickable URL (Google Meet/Zoom link)
@@ -103,17 +100,16 @@ def format_event_to_document(event):
             if entry.get("entryPointType") == "video":
                 conference_link = entry.get("uri", "")
                 break  # Stop after finding the first video link
-    
-    
+
     # Build formatted content
     content = f"# {summary}\n\n"
-    
+
     if description:
         content += f"**Description:** {description}\n\n"
-    
+
     content += f"**Start:** {start_time}\n"
     content += f"**End:** {end_time}\n\n"
-    
+
     if location:
         content += f"**Location:** {location}\n\n"
     if attendees_formatted:
@@ -121,15 +117,15 @@ def format_event_to_document(event):
         for attendee in attendees_formatted:
             content += f"  - {attendee}\n"
         content += "\n"
-    
+
     if conference_link:
         content += f"**Video Conference:** {conference_link}\n\n"
     status = event.get("status", "confirmed")
     content += f"**Status:** {status}\n"
-    
+
     if html_link:
         content += f"**Link:** {html_link}\n"
-    
+
     return {
         "id": event.get("id"),
         "kind": event.get("kind", "calendar#event"),
@@ -139,7 +135,7 @@ def format_event_to_document(event):
         "start_time": start_time,
         "end_time": end_time,
         "location": location,
-        "attendees_count": len(attendees)
+        "attendees_count": len(attendees),
     }
 
 
@@ -149,7 +145,7 @@ async def firstname_lastname_list_calendar_events(
     max_results: int = 10,
     time_min: str = None,
     time_max: str = None,
-    search_query: str = None
+    search_query: str = None,
 ):
     """List events from the user's primary calendar with optional filtering
     Args:
@@ -162,14 +158,14 @@ async def firstname_lastname_list_calendar_events(
         List of formatted calendar events with detailed information
     """
     token = _get_google_token()
-    
+
     # Build query parameters for Google Calendar API
     params = {
         "maxResults": max_results,
         "singleEvents": True,  # Expand recurring events into individual instances
-        "orderBy": "startTime"  # Sort chronologically (requires singleEvents=True)
+        "orderBy": "startTime",  # Sort chronologically (requires singleEvents=True)
     }
-    
+
     # Add optional filters if provided
     if time_min:
         params["timeMin"] = time_min
@@ -177,30 +173,29 @@ async def firstname_lastname_list_calendar_events(
         params["timeMax"] = time_max
     if search_query:
         params["q"] = search_query  # Free text search across event fields
-    
+
     # Fetch events from the user's primary calendar
     response = await _fetch_calendar_data(
-        token,
-        f"{CALENDAR_API_BASE}/calendars/primary/events",
-        params=params
+        token, f"{CALENDAR_API_BASE}/calendars/primary/events", params=params
     )
-    
+
     # Convert raw API response items to formatted documents
-    events = [format_event_to_document(item) for item in response.get("items", [])]
-    
-    result = {
-        "events": events,
-        "total_returned": len(events)
-    }
-    
+    events = [
+        format_event_to_document(item) for item in response.get("items", [])
+    ]
+
+    result = {"events": events, "total_returned": len(events)}
+
     # Handle pagination - Google splits large result sets across multiple requests
     # If there are more events beyond maxResults, Google returns a nextPageToken
     # (e.g., "CiQKGjBhaWs...XyZ") that can be used to fetch the next batch of events
     # To get the next page, pass this token as the 'pageToken' parameter in a new request
     if response.get("nextPageToken"):
         result["next_page_token"] = response["nextPageToken"]
-        result["has_more"] = True  # Signal to caller that more data is available
-    
+        result["has_more"] = (
+            True  # Signal to caller that more data is available
+        )
+
     return result
 
 
@@ -214,7 +209,7 @@ async def firstname_lastname_create_calendar_event(
     end_time: str,
     description: str = "",
     location: str = "",
-    attendees: str = None
+    attendees: str = None,
 ):
     """Create a new calendar event with optional attendees and location
     Args:
@@ -233,22 +228,22 @@ async def firstname_lastname_create_calendar_event(
         "summary": title,
         "description": description,
         "start": {"dateTime": start_time, "timeZone": "UTC"},
-        "end": {"dateTime": end_time, "timeZone": "UTC"}
+        "end": {"dateTime": end_time, "timeZone": "UTC"},
     }
-    
+
     if location:
         event_data["location"] = location
     if attendees:
         email_list = [email.strip() for email in attendees.split(",")]
         event_data["attendees"] = [{"email": email} for email in email_list]
-    
+
     response = await _modify_calendar_data(
         token,
         f"{CALENDAR_API_BASE}/calendars/primary/events",
         method="POST",
-        json_payload=event_data
+        json_payload=event_data,
     )
-    
+
     return format_event_to_document(response)
 
 
@@ -263,17 +258,18 @@ async def firstname_lastname_get_calendar_event(ctx: Context, event_id: str):
     """
     token = _get_google_token()
     response = await _fetch_calendar_data(
-        token,
-        f"{CALENDAR_API_BASE}/calendars/primary/events/{event_id}"
+        token, f"{CALENDAR_API_BASE}/calendars/primary/events/{event_id}"
     )
-    
+
     return format_event_to_document(response)
 
 
 # destructiveHint=True triggers safety prompts, asking the user to confirm
 # before deleting a calendar event (prevents accidental data loss)
 @mcp.tool(annotations={"destructiveHint": True})
-async def firstname_lastname_delete_calendar_event(ctx: Context, event_id: str):
+async def firstname_lastname_delete_calendar_event(
+    ctx: Context, event_id: str
+):
     """Delete a calendar event by ID
     Args:
         ctx: Request context
@@ -285,10 +281,13 @@ async def firstname_lastname_delete_calendar_event(ctx: Context, event_id: str):
     await _modify_calendar_data(
         token,
         f"{CALENDAR_API_BASE}/calendars/primary/events/{event_id}",
-        method="DELETE"
+        method="DELETE",
     )
-    
-    return {"success": True, "message": f"Event {event_id} deleted successfully"}
+
+    return {
+        "success": True,
+        "message": f"Event {event_id} deleted successfully",
+    }
 
 
 # destructiveHint=True triggers safety prompts, asking the user to confirm
@@ -302,7 +301,7 @@ async def firstname_lastname_update_calendar_event(
     end_time: str = None,
     description: str = None,
     location: str = None,
-    attendees: str = None
+    attendees: str = None,
 ):
     """Update an existing calendar event
     Args:
@@ -318,13 +317,12 @@ async def firstname_lastname_update_calendar_event(
         Updated event details with formatted information
     """
     token = _get_google_token()
-    
+
     # First, get the current event
     current_event = await _fetch_calendar_data(
-        token,
-        f"{CALENDAR_API_BASE}/calendars/primary/events/{event_id}"
+        token, f"{CALENDAR_API_BASE}/calendars/primary/events/{event_id}"
     )
-    
+
     # Update only the provided fields
     if title is not None:
         current_event["summary"] = title
@@ -339,14 +337,14 @@ async def firstname_lastname_update_calendar_event(
     if attendees is not None:
         email_list = [email.strip() for email in attendees.split(",")]
         current_event["attendees"] = [{"email": email} for email in email_list]
-    
+
     response = await _modify_calendar_data(
         token,
         f"{CALENDAR_API_BASE}/calendars/primary/events/{event_id}",
         method="PUT",
-        json_payload=current_event
+        json_payload=current_event,
     )
-    
+
     return format_event_to_document(response)
 
 
